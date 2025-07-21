@@ -33,7 +33,15 @@ This addon adds a panel to Blender's sidebar that lets you describe a 3D model i
 - Blender 3.0+
 - Internet connection
 - API key from supported provider
+  
+## Contribution Guidlines:
+
+- Follow existing code style and structure
+- Test your changes in Blender before submitting
+- Add comments for complex functionality
+
+All contributions will be reviewed and credited. Thanks for helping make this project better!
 
 ---
 
-Created by Kashish Patel (Mr_Kuros)
+Created by MrKuros (Kashish Patel)
