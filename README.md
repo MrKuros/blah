@@ -28,12 +28,19 @@ This addon adds a panel to Blender's sidebar that lets you describe a 3D model i
 4. Type what you want to create (e.g., "a red sports car")
 5. Click "Generate Model"
 
+## Output:
+- prompt: "create a dining table"
+- gemini flash:
+  <img width="1920" height="1048" alt="Screenshot from 2025-07-26 12-58-56" src="https://github.com/user-attachments/assets/d6fa678c-8836-4b1f-9dc3-c0eca97cbf45" />
+- groq (llama 3.3):
+  <img width="1920" height="1048" alt="Screenshot from 2025-07-26 12-59-36" src="https://github.com/user-attachments/assets/e3521611-dc13-4d28-9cc1-80e891abdf24" />
+
 ## Requirements
 
 - Blender 3.0+
 - Internet connection
 - API key from supported provider
-  
+
 ## Contribution Guidlines:
 
 - Follow existing code style and structure
