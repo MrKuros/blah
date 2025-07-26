@@ -32,6 +32,8 @@ class AIGenProperties(PropertyGroup):
         items=[
             ('GEMINI', "Google Gemini", "Use Google Gemini API"),
             ('GROQ', "Groq", "Use Groq API with fast inference"),
+            ('OPENAI', "OpenAI GPT", "Use OpenAI GPT models"),
+            ('ANTHROPIC', "Anthropic Claude", "Use Anthropic Claude models"),
             ('CUSTOM', "Custom Model", "Use custom API endpoint")
         ],
         default='GEMINI'
@@ -48,6 +50,31 @@ class AIGenProperties(PropertyGroup):
             ('gemma2-9b-it', "Gemma2 9B", "Gemma2 9B IT")
         ],
         default='llama-3.3-70b-versatile'
+    )
+    
+    openai_model: EnumProperty(
+        name="OpenAI Model",
+        description="Choose OpenAI GPT model",
+        items=[
+            ('gpt-4o-mini', "GPT-4o Mini", "Cheapest and fastest GPT-4 class model"),
+            ('gpt-4.1-mini', "GPT-4.1 Mini", "Latest mini model with improved capabilities"),
+            ('gpt-4o', "GPT-4o", "Most capable multimodal model"),
+            ('gpt-4-turbo', "GPT-4 Turbo", "Previous generation turbo model"),
+            ('gpt-3.5-turbo', "GPT-3.5 Turbo", "Fast and inexpensive model")
+        ],
+        default='gpt-4.1-mini'
+    )
+    
+    anthropic_model: EnumProperty(
+        name="Claude Model",
+        description="Choose Anthropic Claude model",
+        items=[
+            ('claude-sonnet-4-20250514', "Claude Sonnet 4", "Latest and most capable model"),
+            ('claude-3-5-sonnet-20241022', "Claude 3.5 Sonnet", "Most capable model for coding"),
+            ('claude-3-5-haiku-20241022', "Claude 3.5 Haiku", "Fast and cost-effective"),
+            ('claude-3-opus-20240229', "Claude 3 Opus", "Previous flagship model")
+        ],
+        default='claude-sonnet-4-20250514'
     )
     
     api_url: StringProperty(
@@ -121,6 +148,10 @@ class AIGEN_OT_generate(Operator):
                 return self.call_gemini_api(props)
             elif props.api_provider == 'GROQ':
                 return self.call_groq_api(props)
+            elif props.api_provider == 'OPENAI':
+                return self.call_openai_api(props)
+            elif props.api_provider == 'ANTHROPIC':
+                return self.call_anthropic_api(props)
             else:
                 return self.call_custom_api(props)
         except Exception as e:
@@ -228,6 +259,242 @@ bpy.ops.mesh.primitive_cube_add(location=(0, 0, 0))
                     if 'error' in error_data:
                         error_msg += f" - {error_data['error'].get('message', '')}"
                         print(f"DEBUG: Error message: {error_data['error'].get('message', '')}")
+                except:
+                    pass
+            self.report({'ERROR'}, error_msg)
+            return None
+    
+    def call_anthropic_api(self, props):
+        """Call Anthropic Claude API"""
+        if not props.api_key.strip():
+            self.report({'ERROR'}, "Please enter your Anthropic API key")
+            return None
+        
+        url = "https://api.anthropic.com/v1/messages"
+        
+        # Create a detailed prompt for Blender script generation
+        system_prompt = """You are a Blender Python script generator. Generate clean, working Python code that uses the Blender API (bpy) to create 3D models.
+
+Rules:
+1. Only return Python code, no explanations or markdown
+2. Use bpy.ops and bpy.data modules
+3. Create objects at origin (0,0,0) unless specified
+4. Use proper error handling
+5. Clear any existing selections first
+6. Select created objects at the end
+7. Keep code clean and commented
+
+Example format:
+import bpy
+import bmesh
+
+# Clear existing selection
+bpy.ops.object.select_all(action='DESELECT')
+
+# Your model creation code here
+bpy.ops.mesh.primitive_cube_add(location=(0, 0, 0))
+"""
+        
+        user_prompt = f"Generate a Blender Python script to create: {props.prompt}"
+        
+        data = {
+            "model": props.anthropic_model,
+            "max_tokens": 1000,
+            "temperature": 0.7,
+            "system": system_prompt,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": user_prompt
+                }
+            ]
+        }
+        
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": props.api_key,
+            "anthropic-version": "2023-06-01"
+        }
+        
+        response = requests.post(url, json=data, headers=headers, timeout=30)
+        
+        print(f"DEBUG: Anthropic API Response Status: {response.status_code}")
+        print(f"DEBUG: Anthropic API Response: {response.text[:500]}...")  # First 500 chars
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"DEBUG: Parsed JSON keys: {result.keys()}")
+            
+            # Extract the generated text from Anthropic response
+            if 'content' in result and len(result['content']) > 0:
+                content_block = result['content'][0]
+                print(f"DEBUG: Content block keys: {content_block.keys()}")
+                
+                if 'text' in content_block:
+                    content = content_block['text']
+                    print(f"DEBUG: Raw content length: {len(content)}")
+                    print(f"DEBUG: Raw content preview: {content[:200]}...")
+                    
+                    # Clean up the response - remove markdown code blocks if present
+                    if content.startswith('```python'):
+                        content = content.split('```python')[1].split('```')[0]
+                    elif content.startswith('```'):
+                        content = content.split('```')[1].split('```')[0]
+                    
+                    cleaned_content = content.strip()
+                    print(f"DEBUG: Cleaned content length: {len(cleaned_content)}")
+                    print(f"DEBUG: Cleaned content preview: {cleaned_content[:200]}...")
+                    
+                    return cleaned_content
+                else:
+                    print("DEBUG: No text in content block")
+                    self.report({'ERROR'}, "Invalid response structure from Anthropic")
+                    return None
+            else:
+                print("DEBUG: No content in response")
+                self.report({'ERROR'}, "No content generated by Anthropic")
+                return None
+        else:
+            error_msg = f"Anthropic API Error: {response.status_code}"
+            print(f"DEBUG: API Error - Status: {response.status_code}")
+            print(f"DEBUG: API Error - Response: {response.text}")
+            
+            if response.text:
+                try:
+                    error_data = response.json()
+                    if 'error' in error_data:
+                        error_type = error_data['error'].get('type', '')
+                        error_message = error_data['error'].get('message', '')
+                        
+                        # Show more specific error messages
+                        if error_type == 'authentication_error':
+                            error_msg = "Invalid Anthropic API key. Check your key at console.anthropic.com"
+                        elif error_type == 'permission_error':
+                            error_msg = "Anthropic API permission denied. Check your account access"
+                        else:
+                            error_msg += f" - {error_message}"
+                        
+                        print(f"DEBUG: Error type: {error_type}")
+                        print(f"DEBUG: Error message: {error_message}")
+                except:
+                    pass
+            self.report({'ERROR'}, error_msg)
+            return None
+    
+    def call_openai_api(self, props):
+        """Call OpenAI GPT API"""
+        if not props.api_key.strip():
+            self.report({'ERROR'}, "Please enter your OpenAI API key")
+            return None
+        
+        url = "https://api.openai.com/v1/chat/completions"
+        
+        # Create a detailed prompt for Blender script generation
+        system_prompt = """You are a Blender Python script generator. Generate clean, working Python code that uses the Blender API (bpy) to create 3D models.
+
+Rules:
+1. Only return Python code, no explanations or markdown
+2. Use bpy.ops and bpy.data modules
+3. Create objects at origin (0,0,0) unless specified
+4. Use proper error handling
+5. Clear any existing selections first
+6. Select created objects at the end
+7. Keep code clean and commented
+
+Example format:
+import bpy
+import bmesh
+
+# Clear existing selection
+bpy.ops.object.select_all(action='DESELECT')
+
+# Your model creation code here
+bpy.ops.mesh.primitive_cube_add(location=(0, 0, 0))
+"""
+        
+        user_prompt = f"Generate a Blender Python script to create: {props.prompt}"
+        
+        data = {
+            "model": props.openai_model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": system_prompt
+                },
+                {
+                    "role": "user",
+                    "content": user_prompt
+                }
+            ],
+            "temperature": 0.7,
+            "max_tokens": 1000
+        }
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {props.api_key}"
+        }
+        
+        response = requests.post(url, json=data, headers=headers, timeout=30)
+        
+        print(f"DEBUG: OpenAI API Response Status: {response.status_code}")
+        print(f"DEBUG: OpenAI API Response: {response.text[:500]}...")  # First 500 chars
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"DEBUG: Parsed JSON keys: {result.keys()}")
+            
+            # Extract the generated text from OpenAI response
+            if 'choices' in result and len(result['choices']) > 0:
+                choice = result['choices'][0]
+                print(f"DEBUG: Choice keys: {choice.keys()}")
+                
+                if 'message' in choice and 'content' in choice['message']:
+                    content = choice['message']['content']
+                    print(f"DEBUG: Raw content length: {len(content)}")
+                    print(f"DEBUG: Raw content preview: {content[:200]}...")
+                    
+                    # Clean up the response - remove markdown code blocks if present
+                    if content.startswith('```python'):
+                        content = content.split('```python')[1].split('```')[0]
+                    elif content.startswith('```'):
+                        content = content.split('```')[1].split('```')[0]
+                    
+                    cleaned_content = content.strip()
+                    print(f"DEBUG: Cleaned content length: {len(cleaned_content)}")
+                    print(f"DEBUG: Cleaned content preview: {cleaned_content[:200]}...")
+                    
+                    return cleaned_content
+                else:
+                    print("DEBUG: No message/content in choice")
+                    self.report({'ERROR'}, "Invalid response structure from OpenAI")
+                    return None
+            else:
+                print("DEBUG: No choices in response")
+                self.report({'ERROR'}, "No content generated by OpenAI")
+                return None
+        else:
+            error_msg = f"OpenAI API Error: {response.status_code}"
+            print(f"DEBUG: API Error - Status: {response.status_code}")
+            print(f"DEBUG: API Error - Response: {response.text}")
+            
+            if response.text:
+                try:
+                    error_data = response.json()
+                    if 'error' in error_data:
+                        error_type = error_data['error'].get('type', '')
+                        error_message = error_data['error'].get('message', '')
+                        
+                        # Show more specific error messages
+                        if error_type == 'insufficient_quota':
+                            error_msg = "OpenAI quota exceeded. Please add credits at platform.openai.com/billing"
+                        elif error_type == 'invalid_api_key':
+                            error_msg = "Invalid OpenAI API key. Check your key at platform.openai.com/api-keys"
+                        else:
+                            error_msg += f" - {error_message}"
+                        
+                        print(f"DEBUG: Error type: {error_type}")
+                        print(f"DEBUG: Error message: {error_message}")
                 except:
                     pass
             self.report({'ERROR'}, error_msg)
@@ -479,6 +746,53 @@ class AIGEN_OT_test_connection(Operator):
                 else:
                     self.report({'ERROR'}, f"Groq API error: {response.status_code}")
             
+            elif props.api_provider == 'OPENAI':
+                if not props.api_key.strip():
+                    self.report({'ERROR'}, "Please enter your OpenAI API key")
+                    return {'CANCELLED'}
+                
+                # Test with a simple prompt
+                url = "https://api.openai.com/v1/chat/completions"
+                data = {
+                    "model": props.openai_model,
+                    "messages": [{"role": "user", "content": "Say hello"}],
+                    "max_tokens": 10
+                }
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {props.api_key}"
+                }
+                response = requests.post(url, json=data, headers=headers, timeout=10)
+                
+                if response.status_code == 200:
+                    self.report({'INFO'}, "OpenAI API connection successful!")
+                else:
+                    self.report({'ERROR'}, f"OpenAI API error: {response.status_code}")
+            
+            elif props.api_provider == 'ANTHROPIC':
+                if not props.api_key.strip():
+                    self.report({'ERROR'}, "Please enter your Anthropic API key")
+                    return {'CANCELLED'}
+                
+                # Test with a simple prompt
+                url = "https://api.anthropic.com/v1/messages"
+                data = {
+                    "model": props.anthropic_model,
+                    "max_tokens": 10,
+                    "messages": [{"role": "user", "content": "Say hello"}]
+                }
+                headers = {
+                    "Content-Type": "application/json",
+                    "x-api-key": props.api_key,
+                    "anthropic-version": "2023-06-01"
+                }
+                response = requests.post(url, json=data, headers=headers, timeout=10)
+                
+                if response.status_code == 200:
+                    self.report({'INFO'}, "Anthropic API connection successful!")
+                else:
+                    self.report({'ERROR'}, f"Anthropic API error: {response.status_code}")
+            
             else:
                 response = requests.get(props.api_url, timeout=5)
                 if response.status_code == 200:
@@ -543,9 +857,17 @@ class AIGEN_PT_main_panel(Panel):
             box.prop(props, "groq_model", text="Model")
             box.prop(props, "api_key", text="Groq API Key")
             box.label(text="Get your key at: console.groq.com", icon='INFO')
-        else:
+        elif props.api_provider == 'OPENAI':
+            box.prop(props, "openai_model", text="Model")
+            box.prop(props, "api_key", text="OpenAI API Key")
+            box.label(text="Get your key at: platform.openai.com", icon='INFO')
+        elif props.api_provider == 'ANTHROPIC':
+            box.prop(props, "anthropic_model", text="Model")
+            box.prop(props, "api_key", text="Anthropic API Key")
+            box.label(text="Get your key at: console.anthropic.com", icon='INFO')
+        else:  # CUSTOM
             box.prop(props, "api_url", text="API URL")
-            box.prop(props, "api_key", text="API Key")
+            box.prop(props, "api_key", text="API Key (optional)")
         
         # Utility buttons
         row = box.row()
