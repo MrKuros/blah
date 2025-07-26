@@ -10,7 +10,7 @@ from bpy_extras.io_utils import ImportHelper
 bl_info = {
     "name": "AI Model Generator",
     "author": "Kashish Patel (Mr_Kuros)",
-    "version": (1, 0),
+    "version": (1, 1),
     "blender": (3, 0, 0),
     "location": "View3D > Sidebar > AI Gen",
     "description": "Generate 3D models from text prompts using AI",
@@ -31,9 +31,23 @@ class AIGenProperties(PropertyGroup):
         description="Choose AI API provider",
         items=[
             ('GEMINI', "Google Gemini", "Use Google Gemini API"),
+            ('GROQ', "Groq", "Use Groq API with fast inference"),
             ('CUSTOM', "Custom Model", "Use custom API endpoint")
         ],
         default='GEMINI'
+    )
+    
+    groq_model: EnumProperty(
+        name="Groq Model",
+        description="Choose Groq model",
+        items=[
+            ('llama-3.3-70b-versatile', "Llama 3.3 70B", "Llama 3.3 70B Versatile"),
+            ('llama-3.1-70b-versatile', "Llama 3.1 70B", "Llama 3.1 70B Versatile"),
+            ('llama-3.1-8b-instant', "Llama 3.1 8B", "Llama 3.1 8B Instant"),
+            ('mixtral-8x7b-32768', "Mixtral 8x7B", "Mixtral 8x7B"),
+            ('gemma2-9b-it', "Gemma2 9B", "Gemma2 9B IT")
+        ],
+        default='llama-3.3-70b-versatile'
     )
     
     api_url: StringProperty(
@@ -45,7 +59,7 @@ class AIGenProperties(PropertyGroup):
     
     api_key: StringProperty(
         name="API Key",
-        description="Your Gemini API key",
+        description="Your API key (Gemini or Groq)",
         default="",
         maxlen=200,
         subtype='PASSWORD'
@@ -105,6 +119,8 @@ class AIGEN_OT_generate(Operator):
         try:
             if props.api_provider == 'GEMINI':
                 return self.call_gemini_api(props)
+            elif props.api_provider == 'GROQ':
+                return self.call_groq_api(props)
             else:
                 return self.call_custom_api(props)
         except Exception as e:
@@ -203,6 +219,116 @@ bpy.ops.mesh.primitive_cube_add(location=(0, 0, 0))
                 return None
         else:
             error_msg = f"Gemini API Error: {response.status_code}"
+            print(f"DEBUG: API Error - Status: {response.status_code}")
+            print(f"DEBUG: API Error - Response: {response.text}")
+            
+            if response.text:
+                try:
+                    error_data = response.json()
+                    if 'error' in error_data:
+                        error_msg += f" - {error_data['error'].get('message', '')}"
+                        print(f"DEBUG: Error message: {error_data['error'].get('message', '')}")
+                except:
+                    pass
+            self.report({'ERROR'}, error_msg)
+            return None
+    
+    def call_groq_api(self, props):
+        """Call Groq API"""
+        if not props.api_key.strip():
+            self.report({'ERROR'}, "Please enter your Groq API key")
+            return None
+        
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        
+        # Create a detailed prompt for Blender script generation
+        system_prompt = """You are a Blender Python script generator. Generate clean, working Python code that uses the Blender API (bpy) to create 3D models.
+
+Rules:
+1. Only return Python code, no explanations or markdown
+2. Use bpy.ops and bpy.data modules
+3. Create objects at origin (0,0,0) unless specified
+4. Use proper error handling
+5. Clear any existing selections first
+6. Select created objects at the end
+7. Keep code clean and commented
+
+Example format:
+import bpy
+import bmesh
+
+# Clear existing selection
+bpy.ops.object.select_all(action='DESELECT')
+
+# Your model creation code here
+bpy.ops.mesh.primitive_cube_add(location=(0, 0, 0))
+"""
+        
+        user_prompt = f"Generate a Blender Python script to create: {props.prompt}"
+        
+        data = {
+            "model": props.groq_model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": system_prompt
+                },
+                {
+                    "role": "user",
+                    "content": user_prompt
+                }
+            ],
+            "temperature": 0.7,
+            "max_tokens": 1000,
+            "top_p": 1,
+            "stream": False
+        }
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {props.api_key}"
+        }
+        
+        response = requests.post(url, json=data, headers=headers, timeout=30)
+        
+        print(f"DEBUG: Groq API Response Status: {response.status_code}")
+        print(f"DEBUG: Groq API Response: {response.text[:500]}...")  # First 500 chars
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"DEBUG: Parsed JSON keys: {result.keys()}")
+            
+            # Extract the generated text from Groq response
+            if 'choices' in result and len(result['choices']) > 0:
+                choice = result['choices'][0]
+                print(f"DEBUG: Choice keys: {choice.keys()}")
+                
+                if 'message' in choice and 'content' in choice['message']:
+                    content = choice['message']['content']
+                    print(f"DEBUG: Raw content length: {len(content)}")
+                    print(f"DEBUG: Raw content preview: {content[:200]}...")
+                    
+                    # Clean up the response - remove markdown code blocks if present
+                    if content.startswith('```python'):
+                        content = content.split('```python')[1].split('```')[0]
+                    elif content.startswith('```'):
+                        content = content.split('```')[1].split('```')[0]
+                    
+                    cleaned_content = content.strip()
+                    print(f"DEBUG: Cleaned content length: {len(cleaned_content)}")
+                    print(f"DEBUG: Cleaned content preview: {cleaned_content[:200]}...")
+                    
+                    return cleaned_content
+                else:
+                    print("DEBUG: No message/content in choice")
+                    self.report({'ERROR'}, "Invalid response structure from Groq")
+                    return None
+            else:
+                print("DEBUG: No choices in response")
+                self.report({'ERROR'}, "No content generated by Groq")
+                return None
+        else:
+            error_msg = f"Groq API Error: {response.status_code}"
             print(f"DEBUG: API Error - Status: {response.status_code}")
             print(f"DEBUG: API Error - Response: {response.text}")
             
@@ -329,6 +455,30 @@ class AIGEN_OT_test_connection(Operator):
                     self.report({'INFO'}, "Gemini API connection successful!")
                 else:
                     self.report({'ERROR'}, f"Gemini API error: {response.status_code}")
+            
+            elif props.api_provider == 'GROQ':
+                if not props.api_key.strip():
+                    self.report({'ERROR'}, "Please enter your Groq API key")
+                    return {'CANCELLED'}
+                
+                # Test with a simple prompt
+                url = "https://api.groq.com/openai/v1/chat/completions"
+                data = {
+                    "model": props.groq_model,
+                    "messages": [{"role": "user", "content": "Say hello"}],
+                    "max_tokens": 10
+                }
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {props.api_key}"
+                }
+                response = requests.post(url, json=data, headers=headers, timeout=10)
+                
+                if response.status_code == 200:
+                    self.report({'INFO'}, "Groq API connection successful!")
+                else:
+                    self.report({'ERROR'}, f"Groq API error: {response.status_code}")
+            
             else:
                 response = requests.get(props.api_url, timeout=5)
                 if response.status_code == 200:
@@ -389,6 +539,10 @@ class AIGEN_PT_main_panel(Panel):
         if props.api_provider == 'GEMINI':
             box.prop(props, "api_key", text="Gemini API Key")
             box.label(text="Get your key at: ai.google.dev", icon='INFO')
+        elif props.api_provider == 'GROQ':
+            box.prop(props, "groq_model", text="Model")
+            box.prop(props, "api_key", text="Groq API Key")
+            box.label(text="Get your key at: console.groq.com", icon='INFO')
         else:
             box.prop(props, "api_url", text="API URL")
             box.prop(props, "api_key", text="API Key")
